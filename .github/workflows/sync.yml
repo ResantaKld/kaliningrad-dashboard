@@ -1,0 +1,63 @@
+yaml
+name: Sync HTML from Yandex Disk
+
+on:
+  schedule:
+    # Запуск робота в 00 минут каждого часа (для поддержания постоянного цикла)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Добавляет кнопку для ручной проверки в интерфейсе
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Run continuous sync every 10 minutes
+      run: |
+        # Ваша ссылка на файл дашборда
+        PUBLIC_URL="https://disk.360.yandex.ru/d/r5QDJ_HfTJY0yQ"
+        
+        git config --global user.name "Yandex Sync Bot"
+        git config --global user.email "bot@github.com"
+
+        # Цикл выполняется 6 раз внутри одного часа (6 раз по 10 минут = 60 минут)
+        for i in {1..6}
+        do
+          echo "=== Итерация $i: Проверка обновлений дашборда на Яндекс Диске ==="
+          
+          # 1. Запрос к API Яндекса для получения временной прямой ссылки на скачивание файла
+          DOWNLOAD_URL=$(curl -s "https://yandex.net" | jq -r '.href')
+          
+          if [ "$DOWNLOAD_URL" != "null" ] && [ -n "$DOWNLOAD_URL" ]; then
+            # 2. Скачиваем файл под временным именем
+            curl -L -s -o temp_index.html "$DOWNLOAD_URL"
+            
+            # 3. Сравниваем его с тем, что уже лежит на GitHub
+            if ! cmp -s index.html temp_index.html; then
+              # Если файлы отличаются — заменяем index.html и отправляем на GitHub Pages
+              mv temp_index.html index.html
+              git add index.html
+              git commit -m "Авто-обновление дашборда из Яндекс Диска (Итерация $i)"
+              
+              # Пушим в ветку main. Если у вас ветка называется master, замените main на master ниже:
+              git push origin main || echo "Конфликт пуша, попробуем на следующей итерации"
+              echo "Файл изменился! Сайт успешно обновлен."
+            else
+              rm temp_index.html
+              echo "Изменений в файле нет."
+            fi
+          else
+            echo "Ошибка: Не удалось получить ссылку от API Яндекса. Проверьте доступность файла."
+          fi
+
+          # Если это 6-я (последняя) проверка, засыпать не нужно — воркфлоу завершится, и через минуту запустится новый час
+          if [ $i -ne 6 ]; then
+            echo "Ожидание 10 минут перед следующей итерацией..."
+            sleep 600
+          fi
+        done
